@@ -1,0 +1,92 @@
+pipeline {
+  agent any
+  tools {
+    gradle 'gradle 8.3'
+  }
+  stages {
+    stage('github clone') {
+      steps {
+        git branch: 'main', url: 'https://github.com/gusah009/jenkins-study.git'
+      }
+    }
+
+    stage('jar build') {
+      steps {
+        sh '''
+                    echo build start!
+                    gradle clean bootJar
+                '''
+      }
+      post {
+        success {
+          echo 'gradle build success'
+        }
+
+        failure {
+          echo 'gradle build failed'
+        }
+      }
+    }
+
+    stage('[deploy] copy jar to ansible server') {
+      steps {
+        sshPublisher(
+            continueOnError: false, failOnError: true,
+            publishers: [
+                sshPublisherDesc(
+                    configName: "ansible-host",
+                    verbose: true,
+                    transfers: [
+                        sshTransfer(
+                            sourceFiles: "build/libs/jenkins-study-0.0.1-SNAPSHOT.jar",
+                            removePrefix: "build/libs",
+                            remoteDirectory: ".",
+                            execCommand: ""
+                        )
+                    ]
+                )
+            ]
+        )
+      }
+    }
+
+    stage('[deploy] build and push docker image') {
+      steps {
+        sshPublisher(
+            continueOnError: false, failOnError: true,
+            publishers: [
+                sshPublisherDesc(
+                    configName: "ansible-host",
+                    verbose: true,
+                    transfers: [
+                        sshTransfer(
+                            execCommand: "ansible-playbook create-cicd-project-image-playbook.yml;"
+                        )
+                    ]
+                )
+            ]
+        )
+      }
+    }
+
+    stage('[deploy] publish docker image to k8s') {
+      steps {
+        sshPublisher(
+            continueOnError: false, failOnError: true,
+            publishers: [
+                sshPublisherDesc(
+                    configName: "ansible-host",
+                    verbose: true,
+                    transfers: [
+                        sshTransfer(
+                            execCommand: "ansible-playbook /root/k8s/k8s-cicd-deployment-playbook.yml;\n"
+                                + "ansible-playbook /root/k8s/k8s-cicd-service-playbook.yml;"
+                        )
+                    ]
+                )
+            ]
+        )
+      }
+    }
+  }
+}
